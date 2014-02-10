@@ -59,6 +59,8 @@
 %%%
 %%%
 -module(gen_leader).
+-compile([{parse_transform, lager_transform}]).
+
 
 %% Time between rounds of query from the leader
 -define(TAU,5000).
@@ -433,19 +435,24 @@ init_it(Starter,Parent,Name,Mod,{CandidateNodes,OptArgs,Arg},Options) ->
         {{ok, State}, true, false} ->
             Server = #server{parent = Parent,mod = Mod,
                              state = State,debug = Debug},
+            lager:info("gen_leader_a_1"),
             Incarn = incarnation(VarDir, Name, node()),
+            lager:info("gen_leader_a_2"),
             NewE = startStage1(Election#election{incarn = Incarn}, Server),
+            lager:info("gen_leader_a_3"),
             proc_lib:init_ack(Starter, {ok, self()}),
-
+            lager:info("gen_leader_a_4"),
             %% handle the case where there's only one candidate worker and we can't
             %% rely on DOWN messages to trigger the elected() call because we never get
             %% a DOWN for ourselves
             case CandidateNodes =:= [node()] of
                 true ->
                     %% there's only one candidate leader; us
+                    lager:info("gen_leader_a_5"),
                     hasBecomeLeader(NewE,Server,{init});
                 false ->
                     %% more than one candidate worker, continue as normal
+                    lager:info("gen_leader_a_6"),
                     safe_loop(#server{parent = Parent,mod = Mod,
                                       state = State,debug = Debug},
                               candidate, NewE,{init})
@@ -1214,10 +1221,13 @@ startStage1(E, Server) ->
              nextel = E#election.nextel + 1,
              down = [],
              status = elec1},
+    lager:info("gen_leader_startStage1_1:~p",[NewE]),
     case NodePos of
         1 ->
+            lager:info("gen_leader_startStage1_2"),
             startStage2(NewE, Server);
         _ ->
+            lager:info("gen_leader_startStage1_3"),
             mon_nodes(NewE, lesser(node(),E#election.candidate_nodes), Server)
     end.
 
@@ -1331,6 +1341,7 @@ broadcast(Msg, #election{monitored = Monitored} = E) ->
     %% This function is used for broadcasts,
     %% and we make sure only to broadcast to already known nodes.
     ToNodes = [N || {_,N} <- Monitored],
+    %% lager:info("gen_leader_broadcast_1:~p",[Monitored]), 
     broadcast(Msg, ToNodes, E).
 
 broadcast({from_leader, Msg}, ToNodes, E) ->
@@ -1398,23 +1409,31 @@ mon_nodes(E,Nodes,Server) ->
                 E
         end,
     FromNode = node(),
+    lager:info("gen_leader_mon_nodes_1:~p",[FromNode]),
     lists:foldl(
       fun(ToNode,El) ->
               Pid  = {El#election.name, ToNode},
+              lager:info("gen_leader_mon_nodes_2:~p,~p",[Pid,FromNode]),
               Pid ! {heartbeat, FromNode},
               mon_node(El, Pid, Server)
       end,E1,Nodes -- [node()]).
 
 %% Start monitoring one Process
 mon_node(E,Proc,Server) ->
-    {Ref,Node} = do_monitor(Proc, Server),
-    %% E#election{monitored = [{Ref,Node} | E#election.monitored]}.
-    A = {Ref,Node},
-    case lists:member(A,E#election.monitored) of
-        true ->
-            E;
-        false ->
-            E#election{monitored = [A | E#election.monitored]}
+    try
+        lager:info("gen_leader_mon_node_1"),
+        {Ref,Node} = do_monitor(Proc, Server),
+        %% E#election{monitored = [{Ref,Node} | E#election.monitored]}.
+        A = {Ref,Node},
+        case lists:member(A,E#election.monitored) of
+            true ->
+                E;
+            false ->
+                E#election{monitored = [A | E#election.monitored]}
+        end
+    catch _:_->
+            lager:info("gen_leader_mon_node_2"),
+            E
     end.
 
 spawn_monitor_proc() ->
